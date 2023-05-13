@@ -13,8 +13,22 @@ Material Mass Source: https://www.toybuilderlabs.com/blogs/news/13053117-filamen
 
 import struct
 import sys
-print('Choose desired print material of STL file below:')
-material = input('1 = ABS or 2 = PLA or 3 = 3k CFRP or 4 = Plexiglass : ')
+import json
+
+# move to external JSON
+materialList = json.load(open('materials.json'))
+
+print('Available materials:')
+for ind, x in enumerate(materialList):
+    print('\t {:d}: {:s}'.format(ind+1,x['name']))
+materialInput = input('Enter material ID: ')
+
+try:
+    materialInput = int(materialInput)
+    material = materialList[materialInput-1]
+except:
+    print('could not determine material type')
+    exit(-1)
 
 
 class STLUtils:
@@ -42,11 +56,11 @@ class STLUtils:
         return struct.unpack(sig, s)
 
     def read_triangle(self):
-        n = self.unpack("<3f", 12)
-        p1 = self.unpack("<3f", 12)
-        p2 = self.unpack("<3f", 12)
-        p3 = self.unpack("<3f", 12)
-        b = self.unpack("<h", 2)
+        n = self.unpack('<3f', 12)
+        p1 = self.unpack('<3f', 12)
+        p2 = self.unpack('<3f', 12)
+        p3 = self.unpack('<3f', 12)
+        b = self.unpack('<h', 2)
 
         self.normals.append(n)
         l = len(self.points)
@@ -58,83 +72,41 @@ class STLUtils:
         return self.signedVolumeOfTriangle(p1, p2, p3)
 
     def read_length(self):
-        length = struct.unpack("@i", self.f.read(4))
+        length = struct.unpack('@i', self.f.read(4))
         return length[0]
 
     def read_header(self):
         self.f.seek(self.f.tell() + 80)
 
-    def cm3_To_inch3Transform(self, v):
-        return v * 0.0610237441
-
-    def calculateMassCM3(self, totalVolume):
-        totalMass = 0
-        if material in {1, 'ABS'}:
-            totalMass = (totalVolume * 1.04)
-        elif material in {2, 'PLA'}:
-            totalMass = (totalVolume * 1.25)
-        elif material in {3, 'CFRP'}:
-            totalMass = (totalVolume * 1.79)
-        elif material in {4, 'Plexiglass'}:
-            totalMass = (totalVolume * 1.18)
-        elif material in {5, 'Alumide'}:
-            totalMass = (totalVolume * 1.36)
-        elif material in {6, 'Aluminum'}:
-            totalMass = (totalVolume * 2.68)
-        elif material in {7, 'Brass'}:
-            totalMass = (totalVolume * 8.6)
-        elif material in {8, 'Bronze'}:
-            totalMass = (totalVolume * 9.0)
-        elif material in {9, 'Copper'}:
-            totalMass = (totalVolume * 9.0)
-        elif material in {10, 'Gold_14K'}:
-            totalMass = (totalVolume * 13.6)
-        elif material in {11, 'Gold_18K'}:
-            totalMass = (totalVolume * 15.6)
-        elif material in {12, 'Polyamide_MJF'}:
-            totalMass = (totalVolume * 1.01)
-        elif material in {13, 'Polyamide_SLS'}:
-            totalMass = (totalVolume * 0.95)
-        elif material in {14, 'Rubber'}:
-            totalMass = (totalVolume * 1.2)
-        elif material in {15, 'Silver'}:
-            totalMass = (totalVolume * 10.26)
-        elif material in {16, 'Steel'}:
-            totalMass = (totalVolume * 7.86)
-        elif material in {17, 'Titanium'}:
-            totalMass = (totalVolume * 4.41)
-        elif material in {18, 'Resin'}:
-            totalMass = (totalVolume * 1.2)
-        return totalMass
-
     def calculateVolume(self, infilename, unit):
-        print(infilename)
         self.resetVariables()
         totalVolume = 0
         totalMass = 0
         try:
-            self.f = open(infilename, "rb")
+            self.f = open(infilename, 'rb')
             self.read_header()
             l = self.read_length()
-            print("total triangles:", l)
+            print('total triangles: {:,}'.format(l))
+            count=0
+            print('Calculating volume',end='',flush=True)
             try:
                 while True:
                     totalVolume += self.read_triangle()
+                    count = count+1
+                    if count%100000==0:
+                        print('.',end='',flush=True)
             except Exception as e:
-                print("End calculate triangles volume")
+                pass
+            print('')
             totalVolume = (totalVolume / 1000)
-            totalMass = self.calculateMassCM3(totalVolume)
+            totalMass = totalVolume * material['density']
+            print('Total mass: %.2fg'%totalMass)
 
-            if totalMass <= 0:
-                print('Total mass could not be calculated')
+            if unit == 'cm':
+                print('Total volume: %.2fcm^3' % totalVolume)
             else:
-                print('Total mass:', totalMass, 'g')
-
-                if unit == "cm":
-                    print("Total volume:", totalVolume, "cm^3")
-                else:
-                    totalVolume = self.cm3_To_inch3Transform(totalVolume)
-                    print("Total volume:", totalVolume, "inch^3")
+                print('Total volume: %.2finch^3' % (totalVolume* 0.0610237441))
+                    
         except Exception as e:
             print(e)
         return totalVolume
@@ -142,10 +114,12 @@ class STLUtils:
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
-        print("Define model to calculate volume ej: python measure_volume.py torus.stl")
+        print('Define model to calculate volume ej: python measure_volume.py torus.stl')
     else:
         mySTLUtils = STLUtils()
-        if(len(sys.argv) > 2 and sys.argv[2] == "inch"):
-            mySTLUtils.calculateVolume(sys.argv[1], "inch")
-        else:
-            mySTLUtils.calculateVolume(sys.argv[1], "cm")
+        measurmentUnit='cm'
+        if(len(sys.argv) > 2 and sys.argv[2] == 'inch'):
+            measurmentUnit='inch'
+        
+        mySTLUtils.calculateVolume(sys.argv[1], measurmentUnit)
+
